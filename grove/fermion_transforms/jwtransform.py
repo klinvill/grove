@@ -17,7 +17,17 @@
 """
 The Jordan-Wigner Transform
 """
-from pyquil.paulis import PauliTerm
+from pyquil.paulis import PauliTerm, PauliSum, ID, ZERO
+import itertools
+from operator import mul
+
+
+def qubit_create(index):
+    return 1 / 2. * (PauliTerm('X', index, 1.0) + PauliTerm('Y', index, -1.j))
+
+
+def qubit_kill(index):
+    return 1 / 2. * (PauliTerm('X', index, 1.0) + PauliTerm('Y', index, 1.j))
 
 
 class JWTransform(object):
@@ -58,6 +68,130 @@ class JWTransform(object):
         pterm = pterm.simplify()
         return pterm
 
+    def one_body_term(self, i, j):
+        """
+        Gives the equivalent PauliSum for the fermionic terms a_i^{\dagger}a_j + h.c.
+
+        :param i: The first index in the term.
+        :param j: The second index in the term.
+        :return: The equivalent PauliSum for the desired one body term.
+        :rtype: PauliSum
+        """
+        lower_index = min(i, j)
+        upper_index = max(i, j)
+        z_chain = 1
+        ps = 0
+        if lower_index != upper_index:
+            for index in range(lower_index + 1, upper_index):
+                z_chain *= PauliTerm('Z', index)
+
+            for pauli in ['X', 'Y']:
+                ps += (PauliTerm(pauli, lower_index)
+                       * z_chain
+                       * PauliTerm(pauli, upper_index))
+            ps *= 0.5
+        else:
+            return PauliTerm('I', lower_index) + PauliTerm('Z', lower_index, -1.0)
+        return ps
+
+    def two_body_term(self, i, j, k, l):
+        """
+        Gives the equivalent PauliSum for the fermionic terms a_i^{\dagger}a_j^{\dagger}a_ka_l
+         + h.c.
+
+        :param i: The first index in the term.
+        :param j: The second index in the term.
+        :param k: The third index in the term.
+        :param l: The fourth index in the term.
+        :return: The equivalent PauliSum for the desired two body term.
+        :rtype: PauliSum
+        """
+        if i == j or k == l:
+            return PauliSum([ZERO])
+        ps = PauliSum([ID])
+
+        if len({i, j, k, l}) == 4:
+            for op_1, op2, op3 in itertools.product(['X', 'Y'], repeat=3):
+                if paulis.count('X') % 2:
+                    majority = 'X'
+                else:
+                    majority = 'Y'
+                sorted_operators = sorted([(i, op1), (j, op2),
+                                           (k, op3), (l, majority)],
+                                          key=lambda pair: pair[0])
+                (a, operator_a), (b, operator_b), (c, operator_c), (d, operator_d) = sorted_operators
+
+                operator = PauliTerm(operator_a, a)
+                z_chain = 1
+                for index in range(a + 1, b):
+                    z_chain *= PauliTerm('Z', index)
+                operator *= z_chain
+                operator *= PauliTerm(operator_b, b)
+                operator *= PauliTerm(operator_c, c)
+                z_chain = 1
+                for index in range(c + 1, d):
+                    z_chain *= PauliTerm('Z', index)
+                operator *= z_chain
+                operator *= PauliTerm(operator_d, d)
+
+                coefficient = .125
+                parity_condition = bool(paulis[0] != paulis[1] or
+                                        paulis[0] == paulis[2])
+                if (i > j) ^ (k > l):
+                    if not parity_condition:
+                        coefficient *= -1.
+                elif parity_condition:
+                    coefficient *= -1.
+                ps += coefficient * operator
+
+        elif len({i, j, k, l}) == 3:
+            if i == k:
+                a, b = sorted([j, l])
+                c = i
+            elif i == l:
+                a, b = sorted([j, k])
+                c = i
+            elif j == k:
+                a, b = sorted([i, l])
+                c = j
+            elif j == l:
+                a, b = sorted([i, k])
+                c = j
+
+            z_chain = 1
+            for index in range(a + 1, b):
+                z_chain *= PauliTerm('Z', index)
+
+            pauli_z = PauliTerm('Z', c)
+            for operator in ['X', 'Y']:
+                operators = PauliTerm(operator, a) * z_chain * PauliTerm(operator, b)
+
+                if (i == l) or (j == k):
+                    coefficient = .25
+                else:
+                    coefficient = -.25
+
+                hopping_term = coefficient * operators
+                ps -= pauli_z * hopping_term
+                ps += hopping_term
+
+        elif len(set([i, j, k, l])) == 2:
+
+            # Get coefficient.
+            if i == l:
+                coefficient = -0.5
+            else:
+                coefficient = 0.5
+
+            ps -= coefficient
+            ps += PauliTerm('Z', i, coefficient)
+            ps += PauliTerm('Z', j, coefficient)
+            ps -= (coefficient
+                                     * PauliTerm('Z', min(i, j))
+                                     * PauliTerm('Z', max(i, j)))
+
+        return ps
+
     @staticmethod
     def _operator_generator(index, conj):
         """
@@ -75,3 +209,4 @@ class JWTransform(object):
 
         pterm = pterm.simplify()
         return pterm
+
