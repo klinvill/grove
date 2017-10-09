@@ -111,11 +111,12 @@ class JWTransform(object):
         ps = PauliSum([ID])
 
         if len({i, j, k, l}) == 4:
-            for op_1, op2, op3 in itertools.product(['X', 'Y'], repeat=3):
+            for paulis in itertools.product(['X', 'Y'], repeat=3):
                 if paulis.count('X') % 2:
                     majority = 'X'
                 else:
                     majority = 'Y'
+                op1, op2, op3 = paulis
                 sorted_operators = sorted([(i, op1), (j, op2),
                                            (k, op3), (l, majority)],
                                           key=lambda pair: pair[0])
